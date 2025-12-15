@@ -4,11 +4,70 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <mutex>
 #include "data_manager/base.h"
 #include "data_manager/param.h"
 #include "threads/pipeline.h"
 #include "threads/control.h"
 #include "garage/garage.h"
+#include "MvCameraControl.h"
+#include <opencv2/opencv.hpp>
+
+using namespace std;
+
+// 全局相机句柄和帧缓冲
+static void* g_camera_handle = NULL;
+static std::mutex g_frame_mutex;
+static cv::Mat g_display_frame;
+static bool g_new_frame_available = false;
+
+// 视频录制器
+static cv::VideoWriter* g_video_writer = nullptr;
+static std::mutex g_writer_mutex;
+static int g_frame_count = 0;
+static std::chrono::high_resolution_clock::time_point g_start_time;
+static bool g_recording = false;
+
+// 图像回调函数
+void __stdcall HikCameraCallback(unsigned char* pData, MV_FRAME_OUT_INFO* pFrameInfo, void* pUser) {
+    if (pData == NULL || pFrameInfo == NULL) return;
+    
+    try {
+        // 将Bayer RG原始数据转换为BGR图像
+        cv::Mat raw_image(pFrameInfo->nHeight, pFrameInfo->nWidth, CV_8UC1, pData);
+        cv::Mat bgr_image;
+        cv::cvtColor(raw_image, bgr_image, cv::COLOR_BayerRG2BGR);
+        
+        // 保存到全局显示缓冲
+        {
+            std::lock_guard<std::mutex> lock(g_frame_mutex);
+            bgr_image.copyTo(g_display_frame);
+            g_new_frame_available = true;
+        }
+        
+        // 保存视频
+        if (g_recording) {
+            std::lock_guard<std::mutex> lock(g_writer_mutex);
+            if (g_video_writer && g_video_writer->isOpened()) {
+                g_video_writer->write(bgr_image);
+                g_frame_count++;
+                
+                // 检查是否需要停止（30秒）
+                auto current_time = std::chrono::high_resolution_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - g_start_time).count();
+                
+                if (elapsed > 30) {
+                    g_video_writer->release();
+                    rm::message("Video recording completed. Frames: " + std::to_string(g_frame_count) + 
+                                ", Duration: " + std::to_string(elapsed) + "s", rm::MSG_NOTE);
+                    g_recording = false;
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        rm::message("Error in camera callback: " + std::string(e.what()), rm::MSG_ERROR);
+    }
+}
 
 void init_debug() {
     auto param = Param::get_instance();
@@ -60,21 +119,26 @@ bool init_camera() {
         return false;
     }
 
-    // 获取相机数量
-    int camera_num;
-    bool flag_camera = rm::getHikVisionCameraNum(camera_num);
-    Data::camera.clear();
-    Data::camera.resize(camera_num + 1, nullptr);
-    if(!flag_camera) {
-        rm::message("Failed to get camera number", rm::MSG_ERROR);
+    // 枚举海康设备
+    MV_CC_DEVICE_INFO_LIST stDeviceList;
+    memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
+    
+    int nRet = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
+    if (MV_OK != nRet || stDeviceList.nDeviceNum == 0) {
+        rm::message("No Hikvision camera found", rm::MSG_ERROR);
         return false;
     }
-    rm::message("get camera number "+ std::to_string(camera_num), rm::MSG_NOTE);
-    // 初始化单相机
-    if(camera_num == 1) {
-        Data::camera_index = 1;
-        Data::camera_base = 1;
-        Data::camera_far = 1;
+    
+    int camera_num = stDeviceList.nDeviceNum;
+    rm::message("Found " + std::to_string(camera_num) + " Hikvision camera(s)", rm::MSG_NOTE);
+    
+    Data::camera.clear();
+    Data::camera.resize(camera_num, nullptr);
+    
+    if (camera_num == 1) {
+        Data::camera_index = 0;
+        Data::camera_base = 0;
+        Data::camera_far = 0;
 
         double exp = (*param)["Camera"]["Base"]["ExposureTime"];
         double gain = (*param)["Camera"]["Base"]["Gain"];
@@ -83,102 +147,139 @@ bool init_camera() {
         std::string lens_type = (*param)["Camera"]["Base"]["LensType"];
         std::vector<double> camera_offset = (*param)["Car"]["CameraOffset"]["Base"];
 
-        Data::camera[1] = new rm::Camera();
-        flag_camera = rm::openHik(
-            Data::camera[1], 1, &Data::yaw, &Data::pitch, &Data::roll,
-            false, exp, gain, rate);
-
-        if(!flag_camera) {
-            rm::message("Failed to open camera", rm::MSG_ERROR);
+        Data::camera[0] = new rm::Camera();
+        
+        // 创建相机句柄
+        void* handle = NULL;
+        nRet = MV_CC_CreateHandle(&handle, stDeviceList.pDeviceInfo[0]);
+        if (MV_OK != nRet) {
+            rm::message("Failed to create camera handle", rm::MSG_ERROR);
+            delete Data::camera[0];
+            Data::camera[0] = nullptr;
             return false;
         }
-
-        Param::from_json(camlens[camera_type][lens_type]["Intrinsic"], Data::camera[1]->intrinsic_matrix);
-        Param::from_json(camlens[camera_type][lens_type]["Distortion"], Data::camera[1]->distortion_coeffs);
-        rm::tf_rotate_pnp2head(Data::camera[1]->Rotate_pnp2head, camera_offset[3], camera_offset[4], 0.0);
-        rm::tf_trans_pnp2head(Data::camera[1]->Trans_pnp2head, camera_offset[0], camera_offset[1], camera_offset[2], camera_offset[3], camera_offset[4], 0.0);
-        rm::mallocYoloCameraBuffer(&Data::camera[1]->rgb_host_buffer, &Data::camera[1]->rgb_device_buffer, Data::camera[1]->width, Data::camera[1]->height);
-
-
-
-    // 初始化双相机
-    } else if (camera_num == 2) {
-        double exp_base = (*param)["Camera"]["Base"]["ExposureTime"];
-        double gain_base = (*param)["Camera"]["Base"]["Gain"];
-        double rate_base = (*param)["Camera"]["Base"]["FrameRate"];
-        int width_base = (*param)["Camera"]["Base"]["Width"];
-
-        double exp_far = (*param)["Camera"]["Far"]["ExposureTime"];
-        double gain_far = (*param)["Camera"]["Far"]["Gain"];
-        double rate_far = (*param)["Camera"]["Far"]["FrameRate"];
-        int width_far = (*param)["Camera"]["Far"]["Width"];
-
-        std::string camera_type_base = (*param)["Camera"]["Base"]["CameraType"];
-        std::string lens_type_base = (*param)["Camera"]["Base"]["LensType"];
-
-        std::string camera_type_far = (*param)["Camera"]["Far"]["CameraType"];
-        std::string lens_type_far = (*param)["Camera"]["Far"]["LensType"];
-
-        std::vector<double> camera_offset_base = (*param)["Car"]["CameraOffset"]["Base"];
-        std::vector<double> camera_offset_far = (*param)["Car"]["CameraOffset"]["Far"];
-
-
-        for(int i = 1; i <= camera_num; i++) {
-            rm::message("begin open camera "+ std::to_string(i), rm::MSG_NOTE);
-            Data::camera[i] = new rm::Camera();
-            flag_camera = rm::openHik(Data::camera[i], i, &Data::yaw, &Data::pitch, &Data::roll);
-
-            if(!flag_camera) {
-                rm::message("Failed to open camera: " + std::to_string(i), rm::MSG_ERROR);
-                return false;
-            }
-            rm::message("camera width "+ std::to_string(Data::camera[i]->width), rm::MSG_NOTE);
-            if (Data::camera[i]->width == width_base) {
-                Data::camera_base = i;
-                Data::camera_index = i;
-                flag_camera = setHikArgs(Data::camera[i], exp_base, gain_base, rate_base);
-                if(!flag_camera) {
-                    rm::message("Failed to set camera args: " + std::to_string(i), rm::MSG_ERROR);
-                    return false;
+        
+        // 打开相机
+        nRet = MV_CC_OpenDevice(handle);
+        if (MV_OK != nRet) {
+            rm::message("Failed to open Hikvision camera", rm::MSG_ERROR);
+            MV_CC_DestroyHandle(handle);
+            delete Data::camera[0];
+            Data::camera[0] = nullptr;
+            return false;
+        }
+        
+        rm::message("Hikvision camera opened successfully", rm::MSG_NOTE);
+        g_camera_handle = handle;
+        
+        // 设置曝光模式为手动
+        MV_CC_SetEnumValue(handle, "ExposureAuto", 0);
+        
+        // 设置曝光时间
+        MV_CC_SetFloatValue(handle, "ExposureTime", exp);
+        
+        // 设置增益（0-17范围）
+        if (gain > 17.0) gain = 17.0;
+        MV_CC_SetFloatValue(handle, "Gain", gain);
+        
+        // 设置帧率
+        MV_CC_SetFloatValue(handle, "ResultingFrameRate", rate);
+        
+        // 获取相机分辨率
+        MVCC_INTVALUE width_value = {0};
+        MVCC_INTVALUE height_value = {0};
+        MV_CC_GetIntValue(handle, "Width", &width_value);
+        MV_CC_GetIntValue(handle, "Height", &height_value);
+        
+        // 使用硬编码的分辨率（海康MV-CS016-10UC为1440x1080）
+        int width = 1440;
+        int height = 1080;
+        
+        if (width_value.nCurValue > 0 && width_value.nCurValue < 10000) {
+            width = width_value.nCurValue;
+        }
+        if (height_value.nCurValue > 0 && height_value.nCurValue < 10000) {
+            height = height_value.nCurValue;
+        }
+        
+        Data::camera[0]->width = width;
+        Data::camera[0]->height = height;
+        
+        rm::message("Camera resolution: " + std::to_string(width) + "x" + std::to_string(height), rm::MSG_NOTE);
+        
+        // 注册图像回调
+        nRet = MV_CC_RegisterImageCallBack(handle, HikCameraCallback, NULL);
+        if (MV_OK != nRet) {
+            rm::message("Failed to register image callback", rm::MSG_ERROR);
+            MV_CC_CloseDevice(handle);
+            MV_CC_DestroyHandle(handle);
+            delete Data::camera[0];
+            Data::camera[0] = nullptr;
+            return false;
+        }
+        
+        // 开始取流
+        nRet = MV_CC_StartGrabbing(handle);
+        if (MV_OK != nRet) {
+            rm::message("Failed to start camera grabbing", rm::MSG_ERROR);
+            MV_CC_CloseDevice(handle);
+            MV_CC_DestroyHandle(handle);
+            delete Data::camera[0];
+            Data::camera[0] = nullptr;
+            return false;
+        }
+        
+        rm::message("Camera grabbing started successfully", rm::MSG_NOTE);
+        
+        // 加载标定参数
+        Param::from_json(camlens[camera_type][lens_type]["Intrinsic"], Data::camera[0]->intrinsic_matrix);
+        Param::from_json(camlens[camera_type][lens_type]["Distortion"], Data::camera[0]->distortion_coeffs);
+        rm::tf_rotate_pnp2head(Data::camera[0]->Rotate_pnp2head, camera_offset[3], camera_offset[4], 0.0);
+        rm::tf_trans_pnp2head(Data::camera[0]->Trans_pnp2head, camera_offset[0], camera_offset[1], 
+                            camera_offset[2], camera_offset[3], camera_offset[4], 0.0);
+        rm::mallocYoloCameraBuffer(&Data::camera[0]->rgb_host_buffer, &Data::camera[0]->rgb_device_buffer, 
+                                  width, height);
+        
+        // 启动视频录制（如果启用imshow_flag）
+        if (Data::imshow_flag) {
+            system("mkdir -p /home/hero/TJURM-2024/data/video");
+            std::string video_path = "/home/hero/TJURM-2024/data/video/camera_stream_" + 
+                                    std::to_string(std::time(nullptr)) + ".avi";
+            
+            {
+                std::lock_guard<std::mutex> lock(g_writer_mutex);
+                g_video_writer = new cv::VideoWriter(video_path, 
+                                                     cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+                                                     30, 
+                                                     cv::Size(width, height));
+                
+                if (g_video_writer->isOpened()) {
+                    g_recording = true;
+                    g_frame_count = 0;
+                    g_start_time = std::chrono::high_resolution_clock::now();
+                    rm::message("Video recording started: " + video_path, rm::MSG_NOTE);
+                } else {
+                    rm::message("Failed to open video writer", rm::MSG_ERROR);
+                    delete g_video_writer;
+                    g_video_writer = nullptr;
                 }
-
-                Param::from_json(camlens[camera_type_base][lens_type_base]["Intrinsic"], Data::camera[i]->intrinsic_matrix);
-                Param::from_json(camlens[camera_type_base][lens_type_base]["Distortion"], Data::camera[i]->distortion_coeffs);
-                rm::tf_rotate_pnp2head(Data::camera[i]->Rotate_pnp2head, camera_offset_base[3], camera_offset_base[4], 0.0);
-                rm::tf_trans_pnp2head(Data::camera[i]->Trans_pnp2head, camera_offset_base[0], camera_offset_base[1], camera_offset_base[2], camera_offset_base[3], camera_offset_base[4], 0.0);
-                rm::mallocYoloCameraBuffer(&Data::camera[i]->rgb_host_buffer, &Data::camera[i]->rgb_device_buffer, Data::camera[i]->width, Data::camera[i]->height);
-
-            } else if (Data::camera[i]->width == width_far) {
-                Data::camera_far = i;
-                flag_camera = setHikArgs(Data::camera[i], exp_far, gain_far, rate_far);
-                if(!flag_camera) {
-                    rm::message("Failed to set camera args: " + std::to_string(i), rm::MSG_ERROR);
-                    return false;
-                }
-
-                Param::from_json(camlens[camera_type_far][lens_type_far]["Intrinsic"], Data::camera[i]->intrinsic_matrix);
-                Param::from_json(camlens[camera_type_far][lens_type_far]["Distortion"], Data::camera[i]->distortion_coeffs);
-                rm::tf_rotate_pnp2head(Data::camera[i]->Rotate_pnp2head, camera_offset_far[3], camera_offset_far[4], 0.0);
-                rm::tf_trans_pnp2head(Data::camera[i]->Trans_pnp2head, camera_offset_far[0], camera_offset_far[1], camera_offset_far[2], camera_offset_far[3], camera_offset_far[4], 0.0);
-                rm::mallocYoloCameraBuffer(&Data::camera[i]->rgb_host_buffer, &Data::camera[i]->rgb_device_buffer, Data::camera[i]->width, Data::camera[i]->height);
-
-            } else {
-                rm::message("Invalid camera width: " + std::to_string(Data::camera[i]->width), rm::MSG_ERROR);
-                return false;
             }
         }
-
+        
+        rm::message("Camera initialized successfully", rm::MSG_NOTE);
+        return true;
+        
     } else {
-        rm::message("Invalid camera number: " + std::to_string(camera_num), rm::MSG_ERROR);
+        rm::message("Multi-camera mode not fully supported yet", rm::MSG_WARNING);
         return false;
     }
-    return true;
 }
 
 bool deinit_camera() {
-    for(int i = 1; i < Data::camera.size(); i++) {
+    for(int i = 0; i < Data::camera.size(); i++) {
         if(Data::camera[i] == nullptr) continue;
         
+        // 释放YOLO缓冲
         if (Data::camera[i]->rgb_host_buffer != nullptr || Data::camera[i]->rgb_device_buffer != nullptr) {
             rm::freeYoloCameraBuffer(Data::camera[i]->rgb_host_buffer, Data::camera[i]->rgb_device_buffer);
             Data::camera[i]->rgb_host_buffer = nullptr;
@@ -187,8 +288,23 @@ bool deinit_camera() {
 
         delete Data::camera[i];
         Data::camera[i] = nullptr;
-        rm::closeHik();
     }
+    
+    // 关闭相机
+    if (g_camera_handle != nullptr) {
+        MV_CC_StopGrabbing(g_camera_handle);
+        MV_CC_CloseDevice(g_camera_handle);
+        MV_CC_DestroyHandle(g_camera_handle);
+        g_camera_handle = nullptr;
+    }
+    
+    // 关闭视频写入器
+    if (g_video_writer) {
+        g_video_writer->release();
+        delete g_video_writer;
+        g_video_writer = nullptr;
+    }
+    
     rm::message("Camera deinit success", rm::MSG_WARNING);
     return true;
 }

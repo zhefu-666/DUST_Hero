@@ -10,15 +10,22 @@ set(JSON_LIBS
         -lpthread
 )
 
+# 海康SDK路径
+set(MV_SDK_PATH /opt/MVS)
 
 add_library(data_manager
     SHARED
         ${data_src}    
 )
 
+target_include_directories(data_manager PUBLIC ${MV_SDK_PATH}/include)
+target_link_directories(data_manager PUBLIC ${MV_SDK_PATH}/lib/aarch64)
+
 target_link_libraries(data_manager
     PUBLIC
         ${OpenCV_LIBS}
         ${JSON_LIBS}
         ${OpenRM_LIBS}
+        MvCameraControl
+        usb-1.0
 )

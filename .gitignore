@@ -1,2 +1,22 @@
+# ===== build directories =====
 build/
-*.a
+build_new/
+
+# ===== generated binaries =====
+camera_recorder
+camera_viewer
+
+# ===== videos =====
+*.avi
+
+# ===== backup / temp files =====
+*.bak
+*.backup*
+*.swp
+
+# ===== test / demo files =====
+test_camera_frames.cpp
+run_camera_display.sh
+camera_recorder.cpp
+camera_viewer.cpp
+

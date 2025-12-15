@@ -89,7 +89,7 @@ while getopts ":rcg:ls" opt; do
 
 echo -e "${yellow}<--- Start CMake --->${reset}"
 cd build
-cmake ..
+/usr/bin/cmake ..
 
 
 echo -e "${yellow}\n<--- Start Make --->${reset}"
