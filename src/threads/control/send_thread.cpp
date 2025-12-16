@@ -132,15 +132,16 @@ void Control::shootspeed() {
     
     #ifdef TJURM_HERO
     
-    float curr_speed = this->state_bytes_.input_data.curr_speed;
+    float curr_speed = 15.75f;  // Default - lower computer doesn't send this
     float last_speed = speed_queue.back();
 
-    if ((last_speed != curr_speed) && (curr_speed != 15.75f) && speed_write_flag) {
-        speed_file << std::fixed << std::setprecision(10) << curr_speed << "     ";
-        speed_file << std::setprecision(10) << target_yaw << " " << std::setprecision(10) << target_pitch <<std::endl;
-    }
+    // Speed recording disabled as lower computer doesn't send curr_speed
+    // if ((last_speed != curr_speed) && (curr_speed != 15.75f) && speed_write_flag) {
+    //     speed_file << std::fixed << std::setprecision(10) << curr_speed << "     ";
+    //     speed_file << std::setprecision(10) << target_yaw << " " << std::setprecision(10) << target_pitch <<std::endl;
+    // }
     
-    if (curr_speed != 15.75f) speed_queue.push(curr_speed);
+    // if (curr_speed != 15.75f) speed_queue.push(curr_speed);
 
     float avg_speed = speed_queue.pop();
     avg_speed = std::clamp(avg_speed, 14.0f, 16.0f);
@@ -153,6 +154,7 @@ void Control::shootspeed() {
 
     #endif
 }
+
 
 void Control::send_thread() {
     auto garage = Garage::get_instance();

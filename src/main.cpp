@@ -48,6 +48,10 @@ int main(int argc, char** argv) {
     #if defined(TJURM_SENTRY) || defined(TJURM_DRONSE) || defined(TJURM_HERO)
     pipeline->autoaim_baseline();
     #endif
+    
+    // 启动实时画面显示线程
+    std::thread display_t(&Pipeline::display_thread, pipeline);
+    display_t.detach();
 
     while(Data::manu_fire) {
         std::cin.get();

@@ -68,6 +68,7 @@ public:
         std::mutex& mutex_in, bool& flag_in, std::shared_ptr<rm::Frame>& frame_in);
 
     void image_thread();
+    void display_thread();
 
     void start_record();
     void stop_record();

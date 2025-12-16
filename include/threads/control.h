@@ -90,7 +90,6 @@ private:
     Control() {
         
         #ifdef TJURM_HERO
-        this->state_bytes_.input_data.curr_speed = 15.8f;
         #endif
 
         #ifdef TJURM_SENTRY

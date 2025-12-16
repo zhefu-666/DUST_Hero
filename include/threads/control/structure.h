@@ -4,10 +4,10 @@
 
 struct FrameHeader {
     uint8_t     sof;
-    uint8_t     crc8;
 } __attribute__((packed));
 
 struct FrameTailer {
+    uint8_t     padding;          // MCU protocol has 1 padding byte before CRC16
     uint16_t    crc16;
 } __attribute__((packed));
 
@@ -38,7 +38,7 @@ struct InputData {
     uint8_t     autoaim;
     uint8_t     enemy_color;
 } __attribute__((packed));
-
+ 
 struct OutputData {
     uint8_t     fire;
     float       shoot_yaw;
@@ -50,18 +50,18 @@ struct OutputData {
 struct InputData {
     float       curr_yaw;
     float       curr_pitch;
-    uint8_t     state;
-    uint8_t     autoaim;
-    uint8_t     enemy_color;
-    float       curr_speed;
+    uint8_t     state;//状态
+    uint8_t     autoaim;//自瞄开关
+    uint8_t     enemy_color;//敌方颜色，1是红色，2是蓝色
+    uint8_t     reserved;//预留字段
 } __attribute__((packed));
 
 struct OutputData {
-    uint8_t     fire;
-    float       shoot_yaw;
+    uint8_t     fire;//开火
+    float       shoot_yaw;//射击yaw
     float       shoot_pitch;
-    float       avg_speed;
-    uint8_t     food;
+    float       avg_speed;//弹速
+    uint8_t     food;//弹药数量
 } __attribute__((packed));
 #endif
 
@@ -114,6 +114,5 @@ struct OperateBytes {                   // 自瞄返回给电控的控制数据
     OutputData  output_data;
     FrameTailer frame_tailer;
 } __attribute__((packed));
-
 
 #endif

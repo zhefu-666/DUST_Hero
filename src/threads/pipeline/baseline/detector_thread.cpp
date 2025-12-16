@@ -35,10 +35,12 @@ void Pipeline::detector_baseline_thread(
 
         tp0 = getTime();
         while(!flag_in) {
-            if (getDoubleOfS(tp0, getTime()) > 10.0 && Data::timeout_flag) {
-                rm::message("Detector timeout", rm::MSG_ERROR);
-                exit(-1);
-            }
+            // 超时检查已禁用 - 等待输入帧
+            // if (getDoubleOfS(tp0, getTime()) > 10.0 && Data::timeout_flag) {
+            //     rm::message("Detector timeout", rm::MSG_ERROR);
+            //     exit(-1);
+            // }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1)); // 防止busy wait
         }
         
         std::unique_lock<std::mutex> lock_in(mutex_in);

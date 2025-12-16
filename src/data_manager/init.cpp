@@ -17,9 +17,9 @@ using namespace std;
 
 // 全局相机句柄和帧缓冲
 static void* g_camera_handle = NULL;
-static std::mutex g_frame_mutex;
-static cv::Mat g_display_frame;
-static bool g_new_frame_available = false;
+std::mutex g_frame_mutex;
+cv::Mat g_display_frame;
+bool g_new_frame_available = false;
 
 // 视频录制器
 static cv::VideoWriter* g_video_writer = nullptr;
