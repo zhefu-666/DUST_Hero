@@ -63,3 +63,5 @@ bool Data::state_delay_flag;
 double Data::state_delay_time;
 int Data::state_queue_size;
 int Data::send_wait_time;
+
+std::atomic<bool> g_program_running(true);

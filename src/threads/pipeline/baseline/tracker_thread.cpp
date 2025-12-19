@@ -22,6 +22,7 @@ void Pipeline::tracker_baseline_thread(
     init_pointer();
     init_locater();
     init_updater();
+    init_classifier();
     
     if(Data::reprojection_flag) {
         initReprojection(small_width, small_height, big_width, big_height, small_path, big_path);
@@ -47,6 +48,7 @@ void Pipeline::tracker_baseline_thread(
         tp1 = getTime();
         bool track_flag = true;
         if (track_flag) track_flag = pointer(frame);
+        if (track_flag) track_flag = classifier(frame);  // 使用 tiny_resnet 分类
         if (track_flag) track_flag = locater(frame);
         if (track_flag) track_flag = updater(frame);
         tp2 = getTime();

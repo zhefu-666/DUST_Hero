@@ -121,7 +121,7 @@ void Control::receive_thread() {
         float yaw_struct = state_buffer.input_data.curr_yaw;
         float pitch_struct = state_buffer.input_data.curr_pitch;
         
-        if (crc_pass_count <= 3 || crc_pass_count % 20 == 0) {
+        if (crc_pass_count <= 10 || crc_pass_count % 5 == 0) {
             std::cout << "[Pass#" << crc_pass_count << "] Hex: " << bytes_to_hex((unsigned char*)buffer, sizeof(StateBytes)) << "\n";
             std::cout << "  Yaw=" << std::fixed << std::setprecision(4) << yaw_struct 
                       << " Pitch=" << std::setprecision(4) << pitch_struct

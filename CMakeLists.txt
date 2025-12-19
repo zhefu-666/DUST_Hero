@@ -76,6 +76,7 @@ target_link_libraries(TJURM-2024
     MvCameraControl
     usb-1.0
     -lpthread
+    -lX11
 )
 
 install(TARGETS TJURM-2024

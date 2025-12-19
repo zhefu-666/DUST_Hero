@@ -28,6 +28,7 @@ public:
     void init_locater();
     void init_updater();
     void init_fourpoints();
+    void init_classifier();
 
     bool pointer(std::shared_ptr<rm::Frame> frame);
     bool locater(std::shared_ptr<rm::Frame> frame);
@@ -126,6 +127,19 @@ private:
     float* rune_input_device_buffer_ = nullptr;
     float* rune_output_device_buffer_ = nullptr;
     float* rune_output_host_buffer_ = nullptr;
+
+    // Classifier (tiny_resnet) related members
+    cudaStream_t classifier_stream_;
+    nvinfer1::IExecutionContext* classifier_context_ = nullptr;
+    float* classifier_input_host_buffer_ = nullptr;
+    float* classifier_input_device_buffer_ = nullptr;
+    float* classifier_output_device_buffer_ = nullptr;
+    float* classifier_output_host_buffer_ = nullptr;
+    bool classifier_enabled_ = false;
+    int classifier_infer_width_ = 32;
+    int classifier_infer_height_ = 32;
+    int classifier_class_num_ = 10;
+
 private:
     Pipeline() = default;
     Pipeline(const Pipeline&) = delete;

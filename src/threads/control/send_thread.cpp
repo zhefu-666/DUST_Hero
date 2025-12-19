@@ -170,7 +170,7 @@ void Control::send_thread() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(Data::send_wait_time));
 
-        this->message();            // 统一终端发消息
+        // this->message();  // Temporarily disabled due to crash            // 统一终端发消息
         this->state();              // 根据串口更新状态
         this->shootspeed();         // 英雄弹速寄存器
 

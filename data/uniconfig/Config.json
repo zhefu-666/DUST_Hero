@@ -21,7 +21,7 @@
             "PointSkip": false
         },
         "Control": {
-            "Serial": false,
+            "Serial": true,
             "Timeout": true,
             "ManuCapture": false,
             "ManuFire": false,
@@ -139,8 +139,8 @@
             ],
             "Type": "V5",
             "V5": {
-                "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/v5n.onnx",
-                "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/v5n.engine",
+                "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/0526.onnx",
+                "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/0526.engine",
                 "InferWidth": 640,
                 "InferHeight": 480,
                 "LocateNum": 4,
@@ -232,6 +232,14 @@
             "BboxesNum": 20160,
             "ConfThresh": 0.95,
             "NMSThresh": 0.3
+        },
+        "Classifier": {
+            "Enable": false,
+            "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/0526.onnx",
+            "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/0526.engine",
+            "InferWidth": 32,
+            "InferHeight": 32,
+            "ClassNum": 10
         }
     },
     "Points": {

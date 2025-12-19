@@ -5,6 +5,7 @@
 #include <openrm.h>
 #include <Eigen/Dense>
 #include <cstdint>
+#include <atomic>
 
 namespace Data {
 
@@ -70,5 +71,8 @@ bool init_camera();
 bool deinit_camera();
 void init_serial();
 void init_attack();
+
+// 全局程序停止标志
+extern std::atomic<bool> g_program_running;
 
 #endif
