@@ -36,7 +36,19 @@ void __stdcall HikCameraCallback(unsigned char* pData, MV_FRAME_OUT_INFO* pFrame
         // 将Bayer RG原始数据转换为BGR图像
         cv::Mat raw_image(pFrameInfo->nHeight, pFrameInfo->nWidth, CV_8UC1, pData);
         cv::Mat bgr_image;
-        cv::cvtColor(raw_image, bgr_image, cv::COLOR_BayerRG2BGR);
+        cv::cvtColor(raw_image, bgr_image, cv::COLOR_BayerBG2BGR);  // 海康相机通常使用BayerBG
+        
+        // 创建 Frame 并推送到缓冲区（供预处理线程使用）
+        if (Data::camera.size() > 0 && Data::camera[0] != nullptr && Data::camera[0]->buffer != nullptr) {
+            auto frame = std::make_shared<rm::Frame>();
+            frame->image = std::make_shared<cv::Mat>();
+            bgr_image.copyTo(*(frame->image));
+            frame->time_point = getTime();
+            frame->camera_id = 0;
+            frame->width = pFrameInfo->nWidth;
+            frame->height = pFrameInfo->nHeight;
+            Data::camera[0]->buffer->push(frame);
+        }
         
         // 保存到全局显示缓冲
         {
@@ -148,6 +160,7 @@ bool init_camera() {
         std::vector<double> camera_offset = (*param)["Car"]["CameraOffset"]["Base"];
 
         Data::camera[0] = new rm::Camera();
+        Data::camera[0]->buffer = new rm::SwapBuffer<rm::Frame>();
         
         // 创建相机句柄
         void* handle = NULL;
@@ -276,6 +289,28 @@ bool init_camera() {
 }
 
 bool deinit_camera() {
+    // 首先停止相机采集 - 这会停止回调函数被调用
+    if (g_camera_handle != nullptr) {
+        MV_CC_StopGrabbing(g_camera_handle);
+        // 等待一小段时间，确保回调完成
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        MV_CC_CloseDevice(g_camera_handle);
+        MV_CC_DestroyHandle(g_camera_handle);
+        g_camera_handle = nullptr;
+    }
+    
+    // 关闭视频写入器
+    {
+        std::lock_guard<std::mutex> lock(g_writer_mutex);
+        if (g_video_writer) {
+            g_video_writer->release();
+            delete g_video_writer;
+            g_video_writer = nullptr;
+        }
+        g_recording = false;
+    }
+    
+    // 现在可以安全地释放相机资源
     for(int i = 0; i < Data::camera.size(); i++) {
         if(Data::camera[i] == nullptr) continue;
         
@@ -288,21 +323,6 @@ bool deinit_camera() {
 
         delete Data::camera[i];
         Data::camera[i] = nullptr;
-    }
-    
-    // 关闭相机
-    if (g_camera_handle != nullptr) {
-        MV_CC_StopGrabbing(g_camera_handle);
-        MV_CC_CloseDevice(g_camera_handle);
-        MV_CC_DestroyHandle(g_camera_handle);
-        g_camera_handle = nullptr;
-    }
-    
-    // 关闭视频写入器
-    if (g_video_writer) {
-        g_video_writer->release();
-        delete g_video_writer;
-        g_video_writer = nullptr;
     }
     
     rm::message("Camera deinit success", rm::MSG_WARNING);

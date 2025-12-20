@@ -19,4 +19,11 @@ test_camera_frames.cpp
 run_camera_display.sh
 camera_recorder.cpp
 camera_viewer.cpp
+# ===== TensorRT / ONNX models =====
+*.engine
+*.onnx
+
+# ===== backup files =====
+*.bak
+*.bak*
 

@@ -30,7 +30,7 @@ private:
 
 private:
     nlohmann::json params_;
-    std::string default_path_ = "/etc/openrm/Config.json";
+    std::string default_path_ = "/home/hero/DUST_Hero/data/uniconfig/Config.json";
 
 
 };

@@ -1,4 +1,6 @@
 #include "threads/pipeline.h"
+#include <atomic>
+extern std::atomic<bool> g_running;
 #include <thread>
 #include <chrono>
 #include <fstream>
@@ -15,10 +17,11 @@ void Pipeline::recording_thread(std::mutex& mutex_in, bool& flag_in, std::shared
 
     cv::VideoWriter writer;
     std::mutex mutex;
-    while(true) {
+    while(g_running) {
         if(!Data::record_mode) {
             std::unique_lock<std::mutex> lock(mutex);
-            record_cv_.wait(lock, [this]{return Data::record_mode;});
+            record_cv_.wait_for(lock, std::chrono::milliseconds(100), [this]{return Data::record_mode || !g_running;});
+            if (!g_running) break;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(300));

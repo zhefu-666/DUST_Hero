@@ -2,6 +2,9 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <atomic>
+
+extern std::atomic<bool> g_running;
 
 static std::string imshow_msg_buffer;
 
@@ -28,16 +31,22 @@ void Pipeline::image_thread() {
 
     int delay = 1000 / fps;
 
-    while(true) {
-        while(!imshow_in_) {}
+    while(g_running) {
+        int wait_count = 0;
+        while(!imshow_in_ && g_running) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if (++wait_count > 100) break;
+        }
+        if (!g_running) break;
+        if (!imshow_in_) continue;
 
         cv::Mat image = *(this->imshow_register_->image);
         
         if (image.empty()) {
-            std::cout << "图像为空，无法显示" << std::endl;
+            imshow_in_ = false;
             continue;
         } else if (image.type() != CV_8UC1 && image.type() != CV_8UC3 && image.type() != CV_32FC1 && image.type() != CV_32FC3) {
-            std::cout << "图像类型不受支持，无法显示" << std::endl;
+            imshow_in_ = false;
             continue;
         } else {
             cv::Mat resized_image;
@@ -51,7 +60,6 @@ void Pipeline::image_thread() {
                 cv::equalizeHist(channels[2], channels[2]);
                 cv::merge(channels, resized_image);
             }
-
 
             if (Data::imshow_flag) {
                 cv::imshow("tjurm2024frame", resized_image);
@@ -69,12 +77,9 @@ void Pipeline::image_thread() {
                 cv::imwrite(path, resized_image);
             }
 
-
             imshow_in_ = false;
-            
             std::this_thread::sleep_for(std::chrono::milliseconds(delay));
-            
         }
-        
     }
+    std::cout << "[image_thread] Exiting..." << std::endl;
 }

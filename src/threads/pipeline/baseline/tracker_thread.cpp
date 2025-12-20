@@ -1,5 +1,11 @@
 #include "threads/pipeline.h"
+#include <atomic>
+extern std::atomic<bool> g_running;
 #include "threads/control.h"
+
+// 外部声明 - 更新显示线程的检测结果
+extern void update_global_detections(const std::vector<rm::YoloRect>& detections);
+extern void set_classifier_enabled(bool enabled);
 
 using namespace rm;
 
@@ -24,6 +30,11 @@ void Pipeline::tracker_baseline_thread(
     init_updater();
     init_classifier();
     
+    // 通知显示线程分类器状态
+    bool classifier_enable = (*param)["Model"]["Classifier"]["Enable"];
+    set_classifier_enabled(classifier_enable);
+    std::cout << "[TRACKER] Classifier enabled: " << (classifier_enable ? "YES" : "NO") << std::endl;
+    
     if(Data::reprojection_flag) {
         initReprojection(small_width, small_height, big_width, big_height, small_path, big_path);
     }
@@ -32,14 +43,31 @@ void Pipeline::tracker_baseline_thread(
     TimePoint tp0, tp1, tp2;
 
     std::mutex mutex;
-    while (true) {
+    while (g_running) {
+        // 等待 armor_mode 激活
         if (!Data::armor_mode) {
             std::unique_lock<std::mutex> lock(mutex);
-            armor_cv_.wait(lock, [this]{return Data::armor_mode;});
+            // 使用wait_for带超时，定期检查g_running
+            while (!Data::armor_mode && g_running) {
+                armor_cv_.wait_for(lock, std::chrono::milliseconds(100));
+            }
+            if (!g_running) break;
         }
 
+        // 等待输入帧
         std::unique_lock<std::mutex> lock_in(mutex_in);
-        tracker_in_cv_.wait(lock_in, [&flag_in]{return flag_in;});
+        // 使用wait_for带超时，定期检查g_running
+        while (!flag_in && g_running) {
+            tracker_in_cv_.wait_for(lock_in, std::chrono::milliseconds(100));
+        }
+        if (!g_running) {
+            lock_in.unlock();
+            break;
+        }
+        if (!flag_in) {
+            lock_in.unlock();
+            continue;  // 超时但没有数据，继续循环
+        }
 
         std::shared_ptr<rm::Frame> frame = frame_in;
         flag_in = false;
@@ -49,6 +77,12 @@ void Pipeline::tracker_baseline_thread(
         bool track_flag = true;
         if (track_flag) track_flag = pointer(frame);
         if (track_flag) track_flag = classifier(frame);  // 使用 tiny_resnet 分类
+        
+        // ============ 关键修复：分类器处理后更新显示数据 ============
+        // 此时 yolo_list 中的 class_id 和 color_id 已经被分类器更新
+        update_global_detections(frame->yolo_list);
+        // ===========================================================
+        
         if (track_flag) track_flag = locater(frame);
         if (track_flag) track_flag = updater(frame);
         tp2 = getTime();
@@ -64,6 +98,6 @@ void Pipeline::tracker_baseline_thread(
             if (Data::ui_flag) UI(frame);
             imshow(frame);
         }
-        // if (Data::ui_flag) monitor(frame);
     }
+    std::cout << "[tracker_thread] Exiting..." << std::endl;
 }

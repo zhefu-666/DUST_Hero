@@ -29,11 +29,11 @@
             "BigRune": false
         },
         "PlusPnP": {
-            "Enable": true,
+            "Enable": false,
             "CostImage": false
         },
         "StateDelay": {
-            "Enable": true,
+            "Enable": false,
             "TimeS": 0.05,
             "QueueSize": 100,
             "SendWait": 10
@@ -128,7 +128,8 @@
         "Switch": {
             "BaseToFarDist": 7.0,
             "FarToBaseDist": 5.0
-        }
+        },
+        "Timeout": false
     },
     "Model": {
         "YoloArmor": {
@@ -137,16 +138,16 @@
                 "FP",
                 "FPX"
             ],
-            "Type": "V5",
+            "Type": "FP",
             "V5": {
                 "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/0526.onnx",
                 "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/0526.engine",
                 "InferWidth": 640,
-                "InferHeight": 480,
-                "LocateNum": 4,
-                "ColorNum": 0,
-                "ClassNum": 7,
-                "BboxesNum": 18900,
+                "InferHeight": 640,
+                "LocateNum": 8,
+                "ColorNum": 2,
+                "ClassNum": 11,
+                "BboxesNum": 25200,
                 "ConfThresh": 0.3,
                 "NMSThresh": 0.02,
                 "NeedHist": false,
@@ -197,29 +198,37 @@
                 ]
             },
             "FP": {
-                "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/armor_fp.onnx",
-                "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/armor_fp.engine",
+                "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/0526.onnx",
+                "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/0526.engine",
                 "InferWidth": 640,
                 "InferHeight": 640,
-                "LocateNum": 4,
-                "ColorNum": 2,
-                "ClassNum": 7,
-                "BboxesNum": 18900,
+                "LocateNum": 8,
+                "ColorNum": 0,
+                "ClassNum": 13,
+                "BboxesNum": 25200,
                 "ConfThresh": 0.3,
                 "NMSThresh": 0.02,
                 "NeedHist": false,
                 "ClassMap": [
-                    0,
-                    1,
-                    2,
                     3,
                     4,
                     5,
-                    6
+                    0,
+                    1,
+                    2,
+                    6,
+                    3,
+                    4,
+                    5,
+                    0,
+                    1,
+                    2
                 ],
                 "ColorMap": [
                     0,
-                    1
+                    1,
+                    2,
+                    3
                 ]
             }
         },
@@ -235,10 +244,10 @@
         },
         "Classifier": {
             "Enable": false,
-            "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/0526.onnx",
-            "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/0526.engine",
-            "InferWidth": 32,
-            "InferHeight": 32,
+            "DirONNX": "/home/hero/DUST_Hero/data/uniconfig/models/number_classifier.onnx",
+            "DirEngine": "/home/hero/DUST_Hero/data/uniconfig/models/number_classifier.engine",
+            "InferWidth": 20,
+            "InferHeight": 28,
             "ClassNum": 10
         }
     },
