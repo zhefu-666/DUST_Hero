@@ -9,14 +9,14 @@
         "ImageThread": {
             "Scale": 0.5,
             "FPS": 25,
-            "UI": false,
+            "UI": true,
             "Imwrite": false,
             "Binary": false,
             "Light": false,
             "Histogram": false
         },
         "Display": {
-            "Reprojection": false,
+            "Reprojection": true,
             "PipelineDelay": false,
             "PointSkip": false
         },
@@ -148,7 +148,7 @@
                 "ColorNum": 2,
                 "ClassNum": 11,
                 "BboxesNum": 25200,
-                "ConfThresh": 0.3,
+                "ConfThresh": 0.15,
                 "NMSThresh": 0.02,
                 "NeedHist": false,
                 "ClassMap": [
@@ -176,7 +176,7 @@
                 "ColorNum": 4,
                 "ClassNum": 9,
                 "BboxesNum": 25200,
-                "ConfThresh": 0.3,
+                "ConfThresh": 0.15,
                 "NMSThresh": 0.02,
                 "NeedHist": false,
                 "ClassMap": [
@@ -206,7 +206,7 @@
                 "ColorNum": 0,
                 "ClassNum": 13,
                 "BboxesNum": 25200,
-                "ConfThresh": 0.3,
+                "ConfThresh": 0.15,
                 "NMSThresh": 0.02,
                 "NeedHist": false,
                 "ClassMap": [

@@ -9,9 +9,9 @@
 #include <fstream>
 #include <atomic>
 #include <map>
+#include <openrm/pointer/pointer.h>
 
 // 模型 0526.engine 的类别名称映射 (ClassNum=13)
-// 根据测试: 蓝3=0, 红3=7，推断类别顺序
 static const std::map<int, std::string> YOLO_CLASS_NAMES = {
     {0, "B3"},   // 蓝色3号步兵
     {1, "B4"},   // 蓝色4号步兵
@@ -28,12 +28,7 @@ static const std::map<int, std::string> YOLO_CLASS_NAMES = {
     {12, "R2"},  // 红色工程
 };
 
-// 分类器数字映射（启用分类器后使用）
-// 数字分类器输出 class_id 0-9 对应数字 0-9
-// 但是装甲板实际数字只有 0-6 (哨兵/基地=0, 英雄=1, 工程=2, 步兵3/4/5=3/4/5, 前哨=6)
-// 如果分类器输出 7/8/9，可能是识别错误
 static std::string get_classifier_number_name(int class_id) {
-    // 分类器输出的数字直接显示
     if (class_id >= 0 && class_id <= 9) {
         return std::to_string(class_id);
     }
@@ -58,12 +53,23 @@ extern std::atomic<bool> g_running;
 std::mutex g_detection_mutex;
 std::vector<rm::YoloRect> g_detections;
 bool g_detection_updated = false;
-bool g_classifier_enabled = false;  // 标记分类器是否启用
+bool g_classifier_enabled = false;
+
+// 全局装甲板结果（用于重投影）
+std::mutex g_armor_mutex;
+std::vector<rm::Armor> g_armors;
+bool g_armor_updated = false;
 
 void update_global_detections(const std::vector<rm::YoloRect>& detections) {
     std::lock_guard<std::mutex> lock(g_detection_mutex);
     g_detections = detections;
     g_detection_updated = true;
+}
+
+void update_global_armors(const std::vector<rm::Armor>& armors) {
+    std::lock_guard<std::mutex> lock(g_armor_mutex);
+    g_armors = armors;
+    g_armor_updated = true;
 }
 
 void set_classifier_enabled(bool enabled) {
@@ -103,24 +109,61 @@ void Pipeline::display_thread() {
         std::cout << "[Display] Classifier disabled - showing YOLO class labels\n";
     }
     
+    // 获取重投影参数
+    float big_width    = (*param)["Points"]["PnP"]["Red"]["BigArmor"]["Width"];
+    float big_height   = (*param)["Points"]["PnP"]["Red"]["BigArmor"]["Height"];
+    float small_width  = (*param)["Points"]["PnP"]["Red"]["SmallArmor"]["Width"];
+    float small_height = (*param)["Points"]["PnP"]["Red"]["SmallArmor"]["Height"];
+    
+    // 获取重投影贴图路径
+    std::string small_path = (*param)["Debug"]["SmallDecal"];
+    std::string big_path   = (*param)["Debug"]["BigDecal"];
+    
+    // 初始化重投影（加载贴图）
+    if (Data::reprojection_flag) {
+        rm::initReprojection(small_width, small_height, big_width, big_height, small_path, big_path);
+        std::cout << "[Display] Reprojection initialized with images" << std::endl;
+    }
+    
     bool window_available = false;
+    bool reproj_window_available = false;
+    
     if (Data::imshow_flag) {
         try {
             cv::namedWindow("Armor Detection", cv::WINDOW_NORMAL);
             cv::resizeWindow("Armor Detection", 960, 720);
             window_available = true;
-            std::cout << "[Display] Window created\n";
+            std::cout << "[Display] Main window created\n";
         } catch (const cv::Exception& e) {
-            std::cout << "[Display] Window failed: " << e.what() << "\n";
+            std::cout << "[Display] Main window failed: " << e.what() << "\n";
+        }
+        
+        // 创建重投影窗口
+        if (Data::reprojection_flag) {
+            try {
+                cv::namedWindow("Reprojection", cv::WINDOW_NORMAL);
+                cv::resizeWindow("Reprojection", 640, 480);
+                reproj_window_available = true;
+                std::cout << "[Display] Reprojection window created\n";
+            } catch (const cv::Exception& e) {
+                std::cout << "[Display] Reprojection window failed: " << e.what() << "\n";
+            }
         }
     }
     
     cv::Mat local_frame;
+    cv::Mat reproj_frame;  // 重投影显示帧
     std::vector<rm::YoloRect> local_detections;
+    std::vector<rm::Armor> local_armors;
     unsigned long frame_count = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
     
-    // 主循环 - 检查g_running
+    // 创建空白重投影画面
+    reproj_frame = cv::Mat::zeros(480, 640, CV_8UC3);
+    cv::putText(reproj_frame, "Waiting for armor detection...", 
+               cv::Point(100, 240), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(128,128,128), 2);
+    
+    // 主循环
     while (g_running) {
         bool have_new_frame = false;
         
@@ -144,11 +187,18 @@ void Pipeline::display_thread() {
             }
         }
         
+        // 获取装甲板结果（用于重投影）
+        {
+            std::lock_guard<std::mutex> lock(g_armor_mutex);
+            if (g_armor_updated) {
+                local_armors = g_armors;
+                g_armor_updated = false;
+            }
+        }
+        
         if (have_new_frame && !local_frame.empty()) {
             // 绘制检测框
             for (const auto& det : local_detections) {
-                // 根据 color_id 判断颜色
-                // color_id: 0=蓝色, 1=红色
                 cv::Scalar box_color;
                 std::string color_prefix;
                 if (det.color_id == 0) {
@@ -159,10 +209,8 @@ void Pipeline::display_thread() {
                     color_prefix = "R";
                 }
                 
-                // 矩形框
                 cv::rectangle(local_frame, det.box, box_color, 2);
                 
-                // 四点框
                 if (det.four_points.size() == 4) {
                     for (int i = 0; i < 4; i++) {
                         cv::line(local_frame, det.four_points[i], det.four_points[(i+1)%4], 
@@ -171,21 +219,50 @@ void Pipeline::display_thread() {
                     }
                 }
                 
-                // 标签: 根据是否启用分类器选择显示内容
                 std::string label;
                 if (g_classifier_enabled) {
-                    // 分类器启用: 显示颜色前缀 + 分类器识别的数字
-                    // det.color_id 已经在 classifier() 中根据原始 YOLO class_id 设置
-                    // det.class_id 是分类器输出的数字 (0-9)
                     label = color_prefix + get_classifier_number_name(det.class_id) + 
                            " " + std::to_string(int(det.confidence * 100)) + "%";
                 } else {
-                    // 分类器未启用: 显示 YOLO 原始类别名称
                     label = get_yolo_class_name(det.class_id) + 
                            " " + std::to_string(int(det.confidence * 100)) + "%";
                 }
                 cv::putText(local_frame, label, cv::Point(det.box.x, det.box.y - 5), 
                            cv::FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2);
+            }
+            
+            // 更新重投影显示（直接使用YOLO检测的四点）
+            if (Data::reprojection_flag && reproj_window_available) {
+                if (!local_detections.empty()) {
+                    // 有检测，进行重投影
+                    reproj_frame = local_frame.clone();
+                    
+                    for (const auto& det : local_detections) {
+                        if (det.four_points.size() == 4) {
+                            // 根据class_id判断大小装甲板 (1号英雄和前哨站/基地是大装甲板)
+                            // YOLO类别: 0-6蓝方, 7-12红方
+                            // 类别映射: 0,7->1号(英雄大), 5,12->前哨(大), 6,13->基地(大)
+                            int class_mod = det.class_id % 7;  // 0-6 或 7-13 -> 0-6
+                            rm::ArmorSize size = rm::ARMOR_SIZE_SMALL_ARMOR;
+                            if (class_mod == 0 || class_mod == 5 || class_mod == 6) {
+                                size = rm::ARMOR_SIZE_BIG_ARMOR;
+                            }
+                            
+                            // 设置重投影参数并绘制
+                            rm::paramReprojection(small_width, small_height, big_width, big_height);
+                            rm::setReprojection(local_frame, reproj_frame, det.four_points, size);
+                        }
+                    }
+                    
+                    // 添加状态信息
+                    cv::putText(reproj_frame, "Detections: " + std::to_string(local_detections.size()), 
+                               cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0,255,0), 2);
+                } else {
+                    // 无检测，显示等待信息
+                    reproj_frame = local_frame.clone();
+                    cv::putText(reproj_frame, "No armor detected", 
+                               cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0,165,255), 2);
+                }
             }
             
             // 信息显示
@@ -198,24 +275,36 @@ void Pipeline::display_thread() {
             cv::putText(local_frame, "FPS: " + std::to_string(int(fps)), 
                        cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0,255,0), 2);
             
-            // 显示分类器状态
             std::string classifier_status = g_classifier_enabled ? "Classifier: ON" : "Classifier: OFF";
             cv::putText(local_frame, classifier_status, 
                        cv::Point(10, 90), cv::FONT_HERSHEY_SIMPLEX, 0.6, 
                        g_classifier_enabled ? cv::Scalar(0,255,0) : cv::Scalar(0,165,255), 2);
             
-            // 显示窗口
+            // 显示主窗口
             if (window_available) {
                 try {
                     cv::imshow("Armor Detection", local_frame);
-                    int key = cv::waitKey(1);
-                    if (key == 'q' || key == 'Q' || key == 27) {
-                        std::cout << "\n[Display] Exit requested\n";
-                        g_running = false;
-                        break;
-                    }
                 } catch (const cv::Exception& e) {
                     // 忽略显示错误
+                }
+            }
+            
+            // 显示重投影窗口
+            if (reproj_window_available && !reproj_frame.empty()) {
+                try {
+                    cv::imshow("Reprojection", reproj_frame);
+                } catch (const cv::Exception& e) {
+                    // 忽略显示错误
+                }
+            }
+            
+            // 处理按键
+            if (window_available || reproj_window_available) {
+                int key = cv::waitKey(1);
+                if (key == 'q' || key == 'Q' || key == 27) {
+                    std::cout << "\n[Display] Exit requested\n";
+                    g_running = false;
+                    break;
                 }
             }
         }
@@ -223,7 +312,7 @@ void Pipeline::display_thread() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     
-    if (window_available) {
+    if (window_available || reproj_window_available) {
         try {
             cv::destroyAllWindows();
         } catch (...) {}

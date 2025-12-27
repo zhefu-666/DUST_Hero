@@ -70,6 +70,7 @@ void Pipeline::init_fourpoints() {
 
 bool Pipeline::fourpoints(std::shared_ptr<rm::Frame> frame) {
     auto garage = Garage::get_instance();
+    std::cout << "[FP] fourpoints called, yolo_list.size=" << frame->yolo_list.size() << std::endl;
     auto param = Param::get_instance();
     auto control = Control::get_instance();
 
@@ -95,6 +96,7 @@ bool Pipeline::fourpoints(std::shared_ptr<rm::Frame> frame) {
 
     // 遍历所有检测到的装甲板
     for (auto& yolo_rect : frame->yolo_list) {
+        std::cout << "[FP] Processing YOLO detection: class_id=" << yolo_rect.class_id << " points=" << yolo_rect.four_points.size() << std::endl;
 
         // 如果检测到的装甲板不是四个点，跳过
         if(yolo_rect.four_points.size() != 4) continue;
@@ -178,6 +180,7 @@ bool Pipeline::fourpoints(std::shared_ptr<rm::Frame> frame) {
 
         // 更新攻击队列
         Data::attack->push(armor_id, angle, frame->time_point);
+        std::cout << "[FP] Pushed to attack queue: armor_id=" << (int)armor_id << " angle=" << angle << std::endl;
     }
 
     if (Data::image_flag) {

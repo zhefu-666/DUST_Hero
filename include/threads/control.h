@@ -85,6 +85,7 @@ public:
     void message();
     void state();
     void shootspeed();
+    bool check_armor_detection(double& armor_yaw, double& armor_pitch, rm::ArmorID& armor_id);
 
 private:
     Control() {
@@ -108,6 +109,7 @@ public:
 
     int                     file_descriptor_;
     std::string             port_name_;
+    std::mutex              serial_mutex_;            // 保护串口操作的互斥锁
 
 private:
     bool                    send_flag_ = true;

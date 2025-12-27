@@ -50,6 +50,15 @@ void Param::from_json(const json& json_info, cv::Mat& mat_info) {
     int rows = json_info["rows"];
     int cols = json_info["cols"];
     int channel = json_info["channel"];
-    std::vector<float> data = json_info.at("data");
-    mat_info = cv::Mat(data).reshape(channel, rows).clone();
+    
+    // 从JSON数据获取向量（可能是float或double）
+    std::vector<double> data_double = json_info.at("data").get<std::vector<double>>();
+    
+    // 创建double类型的Mat
+    mat_info = cv::Mat(data_double).reshape(channel, rows).clone();
+    
+    // 确保Mat是double类型
+    if (mat_info.type() != CV_64F) {
+        mat_info.convertTo(mat_info, CV_64F);
+    }
 }

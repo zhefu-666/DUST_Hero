@@ -29,6 +29,7 @@ void Pipeline::detector_fourpoints_thread(
     std::mutex mutex;
     TimePoint tp0, tp1, tp2;
     rm::CycleQueue<double> delay_list(100);
+        std::cout << "[DET] armor_mode=" << Data::armor_mode << std::endl;
     while (true) {
         if (!Data::armor_mode) {
             std::unique_lock<std::mutex> lock(mutex);
@@ -82,6 +83,7 @@ void Pipeline::detector_fourpoints_thread(
             exit(-1);
         }
         
+        std::cout << "[DET] yolo_list.size=" << frame->yolo_list.size() << std::endl;
         if (frame->yolo_list.empty()) {
             if (Data::image_flag) imshow(frame);
             continue;

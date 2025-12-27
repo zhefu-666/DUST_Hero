@@ -247,6 +247,30 @@ bool init_camera() {
         // 加载标定参数
         Param::from_json(camlens[camera_type][lens_type]["Intrinsic"], Data::camera[0]->intrinsic_matrix);
         Param::from_json(camlens[camera_type][lens_type]["Distortion"], Data::camera[0]->distortion_coeffs);
+        
+        // 验证内参矩阵是否成功加载
+        std::cout << "[CAMERA-INIT] Intrinsic matrix loaded: " << Data::camera[0]->intrinsic_matrix.rows 
+                  << "x" << Data::camera[0]->intrinsic_matrix.cols << std::endl;
+        if (Data::camera[0]->intrinsic_matrix.rows == 3 && Data::camera[0]->intrinsic_matrix.cols == 3) {
+            double fx = Data::camera[0]->intrinsic_matrix.at<double>(0, 0);
+            double fy = Data::camera[0]->intrinsic_matrix.at<double>(1, 1);
+            double cx = Data::camera[0]->intrinsic_matrix.at<double>(0, 2);
+            double cy = Data::camera[0]->intrinsic_matrix.at<double>(1, 2);
+            std::cout << "[CAMERA-INIT] fx=" << fx << " fy=" << fy << " cx=" << cx << " cy=" << cy << std::endl;
+        }
+        
+        
+        // 验证内参矩阵是否成功加载
+        std::cout << "[CAMERA-INIT] Intrinsic matrix loaded: " << Data::camera[0]->intrinsic_matrix.rows 
+                  << "x" << Data::camera[0]->intrinsic_matrix.cols << std::endl;
+        if (Data::camera[0]->intrinsic_matrix.rows == 3 && Data::camera[0]->intrinsic_matrix.cols == 3) {
+            double fx = Data::camera[0]->intrinsic_matrix.at<double>(0, 0);
+            double fy = Data::camera[0]->intrinsic_matrix.at<double>(1, 1);
+            double cx = Data::camera[0]->intrinsic_matrix.at<double>(0, 2);
+            double cy = Data::camera[0]->intrinsic_matrix.at<double>(1, 2);
+            std::cout << "[CAMERA-INIT] fx=" << fx << " fy=" << fy << " cx=" << cx << " cy=" << cy << std::endl;
+        }
+        
         rm::tf_rotate_pnp2head(Data::camera[0]->Rotate_pnp2head, camera_offset[3], camera_offset[4], 0.0);
         rm::tf_trans_pnp2head(Data::camera[0]->Trans_pnp2head, camera_offset[0], camera_offset[1], 
                             camera_offset[2], camera_offset[3], camera_offset[4], 0.0);
@@ -335,6 +359,15 @@ void init_serial() {
     std::vector<std::string> port_list;
     auto control = Control::get_instance();
 
+    // 获取互斥锁以保护串口操作
+    std::lock_guard<std::mutex> lock(control->serial_mutex_);
+
+    // 关闭已打开的文件描述符（如果存在）
+    if (control->file_descriptor_ > 0) {
+        rm::closeSerialPort(control->file_descriptor_);
+        control->file_descriptor_ = -1;
+    }
+
     while(true) {
 
         #if defined(TJURM_HERO)
@@ -361,10 +394,15 @@ void init_serial() {
             continue;
         }
         if(status == 0) {
+            rm::message("Serial port initialized successfully: " + control->port_name_, rm::MSG_WARNING);
             break;
         }
     }
 }
+
+
+
+
 
 
 void init_attack() {

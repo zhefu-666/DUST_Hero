@@ -10,15 +10,6 @@
 
 using namespace rm;
 
-static std::string bytes_to_hex(const unsigned char* data, int length) {
-    std::stringstream ss;
-    for (int i = 0; i < length; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
-        if (i < length - 1) ss << " ";
-    }
-    return ss.str();
-}
-
 static rm::SerialStatus custom_init_serial_head(int& fd, size_t struct_size, unsigned char sof) {
     unsigned char buffer[2 * struct_size];
     
@@ -104,32 +95,13 @@ void Control::receive_thread() {
 
         bool crc_ok = verify_crc16_check_sum((uint8_t*)buffer, sizeof(StateBytes));
         if (!crc_ok) {
-            if (frame_count % 50 == 0) {
-                std::cout << "[#" << frame_count << "] CRC Failed. Hex: " << bytes_to_hex((unsigned char*)buffer, sizeof(StateBytes)) << "\n";
-            }
             continue;
         }
         
         crc_pass_count++;
 
-        // 手动读取字节来验证
-        float yaw_manual = *((float*)(buffer + 1));
-        float pitch_manual = *((float*)(buffer + 5));
-        
         // 使用结构体方法
         memcpy(&state_buffer, buffer, sizeof(StateBytes));
-        float yaw_struct = state_buffer.input_data.curr_yaw;
-        float pitch_struct = state_buffer.input_data.curr_pitch;
-        
-        if (crc_pass_count <= 10 || crc_pass_count % 5 == 0) {
-            std::cout << "[Pass#" << crc_pass_count << "] Hex: " << bytes_to_hex((unsigned char*)buffer, sizeof(StateBytes)) << "\n";
-            std::cout << "  Yaw=" << std::fixed << std::setprecision(4) << yaw_struct 
-                      << " Pitch=" << std::setprecision(4) << pitch_struct
-                      << " State=0x" << std::hex << (int)state_buffer.input_data.state << std::dec
-                      << " AutoAim=0x" << std::hex << (int)state_buffer.input_data.autoaim << std::dec
-                      << " EnemyColor=0x" << std::hex << (int)state_buffer.input_data.enemy_color << std::dec
-                      << " Reserved=0x" << std::hex << (int)state_buffer.input_data.reserved << std::dec << "\n";
-        }
 
         if (Data::state_delay_flag) {
             std::pair<TimePoint, StateBytes> p = std::make_pair(getTime(), state_buffer);

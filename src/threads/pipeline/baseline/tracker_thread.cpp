@@ -34,6 +34,9 @@ void Pipeline::tracker_baseline_thread(
     bool classifier_enable = (*param)["Model"]["Classifier"]["Enable"];
     set_classifier_enabled(classifier_enable);
     std::cout << "[TRACKER] Classifier enabled: " << (classifier_enable ? "YES" : "NO") << std::endl;
+    std::cout << "[TRACKER] Reprojection flag: " << (Data::reprojection_flag ? "YES" : "NO") << std::endl;
+    std::cout << "[TRACKER] UI flag: " << (Data::ui_flag ? "YES" : "NO") << std::endl;
+    std::cout << "[TRACKER] Image flag: " << (Data::image_flag ? "YES" : "NO") << std::endl;
     
     if(Data::reprojection_flag) {
         initReprojection(small_width, small_height, big_width, big_height, small_path, big_path);

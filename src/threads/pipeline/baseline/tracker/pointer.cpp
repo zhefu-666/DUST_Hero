@@ -40,6 +40,9 @@ static double enemy_split;
 static std::vector<int> armor_class_map;
 static std::vector<int> armor_color_map;
 
+// 外部声明：更新全局装甲板数据
+extern void update_global_armors(const std::vector<rm::Armor>& armors);
+
 void Pipeline::init_pointer() {
     auto param = Param::get_instance();
 
@@ -101,6 +104,11 @@ bool Pipeline::pointer(std::shared_ptr<rm::Frame> frame) {
         armor.id = (rm::ArmorID)(armor_class_map[yolo_rect.class_id]);
         armor.color = (rm::ArmorColor)(armor_color_map[yolo_rect.color_id]);
         setArmorExtendRectIOU(armor, yolo_rect.box, frame->width, frame->height, roi_extend_w, roi_extend_h);
+        static int ptr_count = 0;
+        ptr_count++;
+        if (ptr_count % 30 == 1) {
+            std::cout << "[PTR#" << ptr_count << "] yolo_class=" << yolo_rect.class_id << " armor_id=" << (int)armor.id << " state=" << (int)Data::state << std::endl;
+        }
         armor.size = ARMOR_SIZE_SMALL_ARMOR;
         setArmorRectCenter(armor);
 
@@ -114,8 +122,6 @@ bool Pipeline::pointer(std::shared_ptr<rm::Frame> frame) {
 
         cv::Mat gray, binary;
         rm::getGrayScale(roi, gray, Data::enemy_color, rm::GRAY_SCALE_METHOD_CVT);
-
-        // rm::getBinary(gray, binary, binary_ratio, rm::BINARY_METHOD_MAX_MIN_RATIO);
 
         int threshold_from_hist = rm::getThresholdFromHist(roi, 8, binary_ratio);
         threshold_from_hist = std::clamp(threshold_from_hist, 10, 100);
@@ -235,19 +241,14 @@ bool Pipeline::pointer(std::shared_ptr<rm::Frame> frame) {
             rm::displaySingleArmorRect(*(frame->image), armor);
         }
         
-        if (Data::image_flag && Data::reprojection_flag && Data::ui_flag) {
-            if(armor.color == rm::ARMOR_COLOR_RED) {
-                rm::paramReprojection(small_red_width, small_red_height, big_red_width, big_red_height);
-                rm::setReprojection(*(frame->image), *(frame->image), armor.four_points, armor.size);
-            } else if (armor.color == rm::ARMOR_COLOR_BLUE) {
-                rm::paramReprojection(small_blue_width, small_blue_height, big_blue_width, big_blue_height);
-                rm::setReprojection(*(frame->image), *(frame->image), armor.four_points, armor.size);
-            }
-            
-        } else if (Data::image_flag && Data::ui_flag) {
+        if (Data::image_flag && Data::ui_flag) {
             rm::displaySingleArmorLine(*(frame->image), armor);
         }
+    }
 
+    // 更新全局装甲板数据供显示线程使用（用于重投影）
+    if (Data::reprojection_flag) {
+        update_global_armors(frame->armor_list);
     }
 
     if (frame->armor_list.size() == 0) {

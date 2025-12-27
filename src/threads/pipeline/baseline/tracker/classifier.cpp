@@ -42,7 +42,6 @@ void Pipeline::init_classifier() {
 
     // 加载模型
     if (access(engine_file.c_str(), F_OK) == 0) {
-        // 如果 engine 文件存在，直接加载
         std::cout << "[CLASSIFIER] 加载 Engine 文件..." << std::endl;
         if (!rm::initTrtEngine(engine_file, &classifier_context_)) {
             std::cout << "[CLASSIFIER] 错误: 无法加载 Engine 文件" << std::endl;
@@ -51,7 +50,6 @@ void Pipeline::init_classifier() {
         }
         std::cout << "[CLASSIFIER] Engine 加载成功" << std::endl;
     } else if (access(onnx_file.c_str(), F_OK) == 0) {
-        // 如果只有 onnx 文件，转换并加载
         std::cout << "[CLASSIFIER] 转换 ONNX 为 Engine..." << std::endl;
         if (!rm::initTrtOnnx(onnx_file, engine_file, &classifier_context_, 1U)) {
             std::cout << "[CLASSIFIER] 错误: ONNX 转换失败" << std::endl;
@@ -85,32 +83,28 @@ void Pipeline::init_classifier() {
 }
 
 bool Pipeline::classifier(std::shared_ptr<rm::Frame> frame) {
-    if (!classifier_enabled_ || classifier_context_ == nullptr) {
-        return true;  // 如果分类器未启用，返回 true 继续流程
-    }
-
     if (frame->yolo_list.empty()) {
         return true;  // 没有检测到装甲板，返回 true 继续流程
     }
 
-    // 对每个检测到的装甲板进行分类
+    // ============ 无论分类器是否启用，都需要设置 color_id ============
+    // FP 模型: class_id 0-6 是蓝色, 7-12 是红色
     for (auto& yolo_rect : frame->yolo_list) {
-        // ============ 关键修复：根据 YOLO class_id 设置 color_id ============
-        // FP 模型: class_id 0-6 是蓝色, 7-12 是红色
-        // 在分类器覆盖 class_id 之前，先保存颜色信息到 color_id
         int original_class_id = yolo_rect.class_id;
         if (original_class_id >= 0 && original_class_id <= 6) {
             yolo_rect.color_id = 0;  // 蓝色
         } else if (original_class_id >= 7 && original_class_id <= 12) {
             yolo_rect.color_id = 1;  // 红色
         }
-        
-        // 始终打印调试信息
-        std::cout << "[COLOR_DEBUG] YOLO原始class_id=" << original_class_id 
-                  << " → color_id=" << yolo_rect.color_id 
-                  << " (" << (yolo_rect.color_id == 0 ? "蓝" : "红") << ")" << std::endl;
-        // ===================================================================
-        
+    }
+
+    // 如果分类器未启用，直接返回（color_id 已设置）
+    if (!classifier_enabled_ || classifier_context_ == nullptr) {
+        return true;
+    }
+
+    // 对每个检测到的装甲板进行数字分类
+    for (auto& yolo_rect : frame->yolo_list) {
         // 使用 box 获取 ROI 区域，稍微扩展一下
         cv::Rect roi_rect = yolo_rect.box;
         
@@ -165,7 +159,6 @@ bool Pipeline::classifier(std::shared_ptr<rm::Frame> frame) {
         }
 
         // 更新 yolo_rect 的类别 ID（使用分类器结果）
-        // 分类器输出 0-9 对应装甲板数字
         yolo_rect.class_id = max_class;
         
         // 打印分类结果（调试用）

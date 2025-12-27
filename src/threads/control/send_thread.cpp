@@ -4,7 +4,13 @@
 #include <thread>
 #include <cmath>
 #include <fstream>
+#include <mutex>
+#include <vector>
 using namespace rm;
+
+// 外部声明全局检测结果
+extern std::mutex g_detection_mutex;
+extern std::vector<rm::YoloRect> g_detections;
 
 static double shoot_speed, shoot_delay;
 static double start_fire_delay;
@@ -88,7 +94,6 @@ void Control::state() {
     else Data::target_id = rm::ARMOR_ID_UNKNOWN;
     
     Data::state = get_state();
-    // Data::state = 2;
 
     #ifdef TJURM_SENTRY
     if (Data::target_id != rm::ARMOR_ID_TOWER) {
@@ -132,16 +137,8 @@ void Control::shootspeed() {
     
     #ifdef TJURM_HERO
     
-    float curr_speed = 15.75f;  // Default - lower computer doesn't send this
+    float curr_speed = 15.75f;
     float last_speed = speed_queue.back();
-
-    // Speed recording disabled as lower computer doesn't send curr_speed
-    // if ((last_speed != curr_speed) && (curr_speed != 15.75f) && speed_write_flag) {
-    //     speed_file << std::fixed << std::setprecision(10) << curr_speed << "     ";
-    //     speed_file << std::setprecision(10) << target_yaw << " " << std::setprecision(10) << target_pitch <<std::endl;
-    // }
-    
-    // if (curr_speed != 15.75f) speed_queue.push(curr_speed);
 
     float avg_speed = speed_queue.pop();
     avg_speed = std::clamp(avg_speed, 14.0f, 16.0f);
@@ -155,6 +152,100 @@ void Control::shootspeed() {
     #endif
 }
 
+// 检查是否有装甲板检测结果，并计算其相对云台的 YAW 和 PITCH
+bool Control::check_armor_detection(double& armor_yaw, double& armor_pitch, rm::ArmorID& armor_id) {
+    static int call_count = 0;
+    std::lock_guard<std::mutex> lock(g_detection_mutex);
+    
+    if (g_detections.empty()) {
+        armor_id = rm::ARMOR_ID_UNKNOWN;
+        return false;
+    }
+    
+    const auto& yolo_rect = g_detections[0];
+    
+    // 计算装甲板中心点
+    int img_center_x = yolo_rect.box.x + yolo_rect.box.width / 2;
+    int img_center_y = yolo_rect.box.y + yolo_rect.box.height / 2;
+    
+    // 获取摄像机内参
+    rm::Camera* camera = Data::camera[Data::camera_index];
+    if (!camera) {
+        std::cout << "[ERROR-CAMERA-NULL] camera pointer is null, camera_index=" << Data::camera_index 
+                  << " camera array size=" << Data::camera.size() << "\n";
+        armor_id = rm::ARMOR_ID_UNKNOWN;
+        return false;
+    }
+    
+    // Debug: verify intrinsic matrix is valid
+    if (camera->intrinsic_matrix.empty() || camera->intrinsic_matrix.rows != 3 || camera->intrinsic_matrix.cols != 3) {
+        std::cout << "[ERROR-INTRINSIC-INVALID] matrix dims: " << camera->intrinsic_matrix.rows 
+                  << "x" << camera->intrinsic_matrix.cols << ", empty=" << camera->intrinsic_matrix.empty() << "\n";
+    }
+    double fx = camera->intrinsic_matrix.at<double>(0, 0);
+    double fy = camera->intrinsic_matrix.at<double>(1, 1);
+    double cx = camera->intrinsic_matrix.at<double>(0, 2);
+    double cy = camera->intrinsic_matrix.at<double>(1, 2);
+    
+    // 计算像素偏移
+    double pixel_x = img_center_x - cx;
+    double pixel_y = img_center_y - cy;
+    
+    // 转换为角度偏移（使用atan2公式）
+    double offset_yaw = std::atan2(pixel_x, fx) * 180.0 / M_PI;
+    double offset_pitch = std::atan2(pixel_y, fy) * 180.0 / M_PI;
+    
+    // 获取当前云台角度
+    double gimbal_yaw = get_yaw();
+    double gimbal_pitch = get_pitch();
+    
+    // 计算目标角度
+    armor_yaw = gimbal_yaw + offset_yaw;
+    armor_pitch = gimbal_pitch + offset_pitch;
+    
+    // 设置装甲板ID
+    static std::vector<int> armor_class_map;
+    static bool map_initialized = false;
+    if (!map_initialized) {
+        auto param = Param::get_instance();
+        std::string yolo_type = (*param)["Model"]["YoloArmor"]["Type"];
+        auto json_class_map = (*param)["Model"]["YoloArmor"][yolo_type]["ClassMap"];
+        armor_class_map.clear();
+        for (const auto& item : json_class_map) {
+            armor_class_map.push_back((int)item);
+        }
+        map_initialized = true;
+    }
+    
+    if (yolo_rect.class_id >= 0 && yolo_rect.class_id < armor_class_map.size()) {
+        armor_id = (rm::ArmorID)armor_class_map[yolo_rect.class_id];
+    } else {
+        armor_id = rm::ARMOR_ID_UNKNOWN;
+    }
+    
+    // 每10次调用输出详细诊断信息
+    if (call_count % 10 == 0) {
+        std::cout << "[DIAG-#" << call_count << "]"
+                  << " BOX:(" << yolo_rect.box.x << "," << yolo_rect.box.y 
+                  << ") " << yolo_rect.box.width << "x" << yolo_rect.box.height
+                  << " | CENTER:(" << img_center_x << "," << img_center_y << ")"
+                  << " | INTRINSIC: fx=" << std::fixed << std::setprecision(1) << fx 
+                  << " fy=" << fy << " cx=" << cx << " cy=" << cy
+                  << " | PIXEL_OFFSET:(" << std::setprecision(2) << pixel_x 
+                  << "," << pixel_y << ")"
+                  << " | ANGLE_OFFSET: yaw=" << std::setprecision(4) << offset_yaw 
+                  << "° pitch=" << offset_pitch << "°"
+                  << " | GIMBAL: yaw=" << gimbal_yaw << "° pitch=" << gimbal_pitch << "°"
+                  << " | TARGET: yaw=" << armor_yaw << "° pitch=" << armor_pitch << "°\n";
+    }
+    call_count++;
+    
+    return true;
+}
+
+
+
+
 
 void Control::send_thread() {
     auto garage = Garage::get_instance();
@@ -163,6 +254,10 @@ void Control::send_thread() {
     init_send();
     
     std::mutex mutex;
+    double detected_yaw = 0, detected_pitch = 0;
+    rm::ArmorID detected_armor_id = rm::ARMOR_ID_UNKNOWN;
+    int frame_count = 0;
+    
     while(true) {
         if(!send_flag_) {
             std::unique_lock<std::mutex> lock(mutex);
@@ -170,17 +265,29 @@ void Control::send_thread() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(Data::send_wait_time));
 
-        // this->message();  // Temporarily disabled due to crash            // 统一终端发消息
-        this->state();              // 根据串口更新状态
-        this->shootspeed();         // 英雄弹速寄存器
+        this->state();
+        this->shootspeed();
 
-        // 根据目标id判断是否需要自瞄
+        frame_count++;
+        bool has_armor = check_armor_detection(detected_yaw, detected_pitch, detected_armor_id);
+
+        // ★ 新策略：如果检测到装甲板，优先发送装甲板位置
+        #ifdef TJURM_HERO
+        if (has_armor) {
+            send_single(detected_yaw, detected_pitch, false, detected_armor_id);
+            continue;
+        }
+        #endif
+
+        // 如果没有装甲板，继续原有逻辑
         if(Data::target_id == rm::ARMOR_ID_UNKNOWN) {
             #if defined(TJURM_INFANTRY) || defined(TJURM_BALANCE) || defined(TJURM_DRONSE)
             continue;
             #endif
 
             #ifdef TJURM_HERO
+            std::cout << "[TRACE] 执行: target_id==UNKNOWN分支 -> send_single(gimbal_yaw, gimbal_pitch)\n";
+            std::cout << "[TRACE] 执行: target_id==UNKNOWN分支 -> send_single(gimbal_yaw, gimbal_pitch)\n";
             send_single(get_yaw(), get_pitch(), false);
             continue;
             #endif
@@ -192,9 +299,10 @@ void Control::send_thread() {
             if(abs(camsense_x) < 1e-2 && abs(camsense_y) < 1e-2) continue;
 
             getFlyDelay(target_yaw, target_pitch, shoot_speed, camsense_x, camsense_y, camsense_z);
+            std::cout << "[TRACE] 执行: 迭代法分支 -> send_single(target_yaw, target_pitch)\n";
+            std::cout << "[TRACE] 执行: 迭代法分支 -> send_single(target_yaw, target_pitch)\n";
             send_single(target_yaw, target_pitch, false);
             continue;
-
             #endif
         }
 
@@ -215,6 +323,8 @@ void Control::send_thread() {
             #endif
 
             #ifdef TJURM_HERO
+            std::cout << "[TRACE] 执行: target_id==UNKNOWN分支 -> send_single(gimbal_yaw, gimbal_pitch)\n";
+            std::cout << "[TRACE] 执行: target_id==UNKNOWN分支 -> send_single(gimbal_yaw, gimbal_pitch)\n";
             send_single(get_yaw(), get_pitch(), false);
             continue;
             #endif
@@ -226,9 +336,10 @@ void Control::send_thread() {
             if(abs(camsense_x) < 1e-2 && abs(camsense_y) < 1e-2) continue;
 
             getFlyDelay(target_yaw, target_pitch, shoot_speed, camsense_x, camsense_y, camsense_z);
+            std::cout << "[TRACE] 执行: 迭代法分支 -> send_single(target_yaw, target_pitch)\n";
+            std::cout << "[TRACE] 执行: 迭代法分支 -> send_single(target_yaw, target_pitch)\n";
             send_single(target_yaw, target_pitch, false);
             continue;
-
             #endif
         }
 
@@ -237,6 +348,8 @@ void Control::send_thread() {
         bool autoaim_flag = get_autoaim();
 
         fire = (fire && start_delay_flag && autoaim_flag && Data::auto_fire);
+        std::cout << "[TRACE] 执行: 最后分支 -> send_single(target_yaw=" << target_yaw << ", target_pitch=" << target_pitch << ", fire, target_id)\n";
+        std::cout << "[TRACE] 执行: 最后分支 -> send_single(target_yaw=" << target_yaw << ", target_pitch=" << target_pitch << ", fire, target_id)\n";
         send_single(target_yaw, target_pitch, fire, Data::target_id);
     }
 }

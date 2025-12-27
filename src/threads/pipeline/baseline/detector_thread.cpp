@@ -122,7 +122,7 @@ void Pipeline::detector_baseline_thread(
         update_global_detections(frame->yolo_list);
         
         // 调试输出（每30帧）
-        if (debug_counter % 30 == 1) {
+        if (debug_counter % 10 == 1) {
             std::cout << "[DETECT] 帧 " << debug_counter 
                       << " | 检测数量: " << frame->yolo_list.size();
             if (!frame->yolo_list.empty()) {
